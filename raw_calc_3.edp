@@ -1,0 +1,147 @@
+//================================================================
+//   cifar train 3
+//================================================================
+
+//output train data
+ofstream ff("cifar_data/raw_train_output_3.txt");
+
+//input potential data
+ifstream ifile("cifar_data/raw_train_images_3.txt");
+
+//Number of data
+int Nd = 30000;  // number for data cifar 
+//int Nd = 1;  // check data
+
+//Number of boundary measurement mesh (network size 64x64)
+int Nn = 64;
+
+real ntheta = 2 * pi / Nn;
+
+//difference delta
+real delta = 0.005;
+
+//escape from singularity
+real nshift = ntheta / 2.0;
+
+real center = 0.5;
+real radius = 0.499999999999999999999;
+
+// definition of boundary
+border G(t=0,2*pi) { x=center + radius*cos(t); y=center + radius*sin(t); }
+
+
+// definition of bunkatsu
+int Nm  = Nn * 10;
+mesh Th = buildmesh( G(Nm) );
+
+
+//finite element space P1 and P0
+fespace Ph(Th,P0);
+fespace Vh(Th,P1);
+
+// to Define potentail value
+real[int,int] pv(32,32);
+
+Ph pce;
+
+int gx, gy;
+real px, py;
+
+
+//function of solution
+Vh u,uu,w,ww,uw;
+
+
+//Dirichlet boundary data
+Ph[int] g(Nn);
+
+
+//Boundary and inside position parameters
+real ta;
+real tb;
+real xa, ya;
+real xb, yb;
+
+for (int k=0; k < Nn; k++){
+    // definition of Dirichlet data
+    ta = - pi + ntheta * k;
+    tb = - pi + ntheta * (k + 1.0);
+    func real bg(real x, real y)
+    {
+	if ((ta < atan2(x-center,y-center)) & (atan2(x-center,y-center) < tb))
+	   return 1.0;
+	else
+	   return 0.0;
+    }
+    g[k] = bg(x,y);
+}
+
+
+real cpu = clock();
+
+// loop for each potential
+for (int n=0; n < Nd; n++){
+    cout << "start: read all images files" << endl;
+    for (int j=0; j < 32; j++){
+    	for (int i=0; i < 32; i++){
+    	    ifile >> pv(i,j);
+	}	    
+    }
+    cout << "  end: read all images files" << endl;
+
+    cout << "start: input to image data to fespace" << endl; 
+    for (int i=0; i < Ph.nt; i++){
+    	px = 0;
+    	py = 0;
+    	for (int j=0; j <3; j++){
+    	    px += Th[i][j].x;
+	    py += Th[i][j].y;
+        }
+	px *= 32.0/3.0;
+	py *= 32.0/3.0;
+	gx = floor(px);
+    	gy = floor(py);
+    	pce[][i] = pv(gx,gy);
+    }
+    cout << "  end: input to image data to fespace" << endl;
+
+    //Computation 
+    for (int k=0; k < Nn; k++){
+    	cout << "n = " << n << endl;
+    	//Solve the problems
+    	solve Potential(u,uu)
+   	 =  int2d(Th)(dx(u)*dx(uu)+dy(u)*dy(uu)) 
+      	   + int2d(Th)((pce*u)*uu)
+      	   + on(G,u=g[k]);
+
+    	solve Laplacian(w,ww)
+   	 =  int2d(Th)(dx(w)*dx(ww)+dy(w)*dy(ww))
+      	   + on(G,w=g[k]);
+
+    	uw = u-w;
+
+    	//output training data
+    	//channel 1 (direct Neumann data)	
+    	for (int i=0; i < Nn; i++){
+    	    ta = ntheta * i + nshift;
+    	    xa = center + radius * cos(ta);
+    	    ya = center + radius * sin(ta);
+    	    xb = center + (radius - delta) * cos(ta);
+    	    yb = center + (radius - delta) * sin(ta);
+	    ff << -(u(xa, ya) - u(xb, yb))/delta <<" ";
+    	}
+    	ff << "\n";
+
+    	//channel 2 (difference Neumann data)
+    	for (int i=0; i < Nn; i++){
+    	    ta = ntheta * i + nshift;
+    	    xa = center + radius * cos(ta);
+    	    ya = center + radius * sin(ta);
+    	    xb = center + (radius - delta) * cos(ta);
+    	    yb = center + (radius - delta) * sin(ta);
+	    ff << -(uw(xa, ya) - uw(xb, yb))/delta <<" ";
+    	}
+    	ff << "\n";
+    }
+}
+cout << " CPU time = " << clock() - cpu << endl;

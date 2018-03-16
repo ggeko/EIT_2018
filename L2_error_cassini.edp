@@ -1,0 +1,193 @@
+//================================================================
+//   L2 error estimate for cassini output data of neural network
+//================================================================
+
+
+//output train data
+ofstream ff("cifar_data/L2_error_cassini.txt");
+//ofstream ff("check_output.txt");
+
+
+//input potential data
+ifstream ifile("cifar_data/fem_test_images.txt");
+
+//input potential data
+ifstream cfile("cifar_data/test_images_cassini.txt");
+
+
+//Number of data
+int Nd = 3000;  // number of neural network output data
+
+
+//Number of boundary measurement mesh (network size 64x64)
+int Nn = 64;
+
+
+//unit circle
+real radius = 1.0;
+
+
+// Cassini parameter
+real alpha = 0.9;
+
+
+// HOSEI parameter
+real bit = 0.99999999999999999999;
+
+
+//===========================================================
+// Cassini boundary by polar coodinate
+func real RP(real t)
+{
+real ca = cos(2.0 * t);
+return alpha * sqrt(ca + sqrt(ca*ca + (1.0/alpha)^4 - 1.0));
+}
+
+func real XP(real t)
+{
+return RP(t) * cos(t);
+}
+
+func real YP(real t)
+{
+return RP(t) * sin(t);
+}
+//===========================================================
+
+
+//===========================================================
+// Cassini boundary by Riemann conformal map
+func complex conformal(complex w)
+{
+return (sqrt(1.0 - alpha^4)) * w / sqrt(1.0 - (alpha*w)^2);
+}
+
+func real XC(real r, real t)
+{
+return real(conformal(r*cos(t) + r*sin(t)*1i));
+}
+
+func real YC(real r, real t)
+{
+return imag(conformal(r*cos(t) + r*sin(t)*1i));
+}
+//===========================================================
+
+
+//===========================================================
+// inverse conformal map for Cassini
+func complex inverse(complex w)
+{
+return w / (sqrt(1.0 - alpha^4 + (alpha*w)^2));
+}
+
+func real XI(real xx, real yy)
+{
+return bit * real(inverse(xx + yy*1i));
+}
+
+func real YI(real xx, real yy)
+{
+return bit * imag(inverse(xx + yy*1i));
+}
+//===========================================================
+
+
+//===========================================================
+// square and absolute value for Jacobian of 
+// inverse conformal map for Cassini
+func real sajacobian(real xx, real yy)
+{
+complex w = xx + yy*1i;
+complex qvar = sqrt(1.0 - alpha^4 + (alpha*w)^2);
+return (abs((1.0/qvar) - alpha * w^2 / (qvar^3)))^2;
+}
+//===========================================================
+
+
+
+// definition of Cassini boundary by polar coodinate
+border G(t = 0, 2*pi) { x=XP(t); y=YP(t); }
+
+
+// definition of bunkatsu
+int Nm  = Nn * 10;
+mesh Th = buildmesh( G(Nm) );
+plot(Th, wait = true);
+
+
+
+//finite element space P1 and P0
+fespace Ph(Th,P0);
+fespace Vh(Th,P1);
+
+
+// to Define potentail value
+real[int,int] pv(32,32);
+real[int,int] pw(32,32);
+
+Ph pvc, pwc, puc;
+
+int gx, gy;
+real px, py;
+
+
+// transform for potential definition for cassini
+real ra = sqrt(1.0 + alpha^2);
+func real trans(real zp)
+{
+return 16.0*bit*(zp + ra)/ra;
+}
+
+
+// transform for calc. potential for unit circle
+func real transunit(real zs)
+{
+return 16.0*bit*(zs + 1.0);
+}
+
+
+
+// loop for each potential
+for (int n=0; n < Nd; n++){
+    // definition of potential by cifar10
+    for (int j=0; j < 32; j++){
+        for (int i=0; i < 32; i++){
+            ifile >> pv(i,j);
+            cfile >> pw(i,j);
+        }           
+    }
+
+    for (int i=0; i < Ph.nt; i++){
+        px = 0;
+        py = 0;
+        for (int j=0; j <3; j++){
+            px += Th[i][j].x;
+            py += Th[i][j].y;
+        }
+        px = px / 3.0;
+        py = py / 3.0;
+	// calc for exact solution
+	gx = floor(trans(px));
+        gy = floor(trans(py));
+	pvc[][i] = pv(gx,gy);
+	// calc for approx. values 
+	ps = XI(px,py);
+	pt = YI(px,py);
+	gs = floor(transunit(ps));
+        gt = floor(transunit(pt));
+        pwc[][i] = pw(gs,gt) * sajacobian(px, py);
+    }
+    
+    // L2 error computation 
+    puc = pvc - pwc;
+    errl2 = sqrt( int2d(Th)(puc^2) );
+    
+    // output results
+    ff << errl2 << " ";
+}
+
+ff << "\n";
+
+
+
